@@ -32,11 +32,10 @@ def fake_redis():
     return FakeRedis(store=store)
 
 
-def test_whoami_with_session_cookie(monkeypatch, fake_redis):
-    """Test /whoami returns ms_oid when session cookie is present and valid."""
-    # Monkeypatch redis_client directly in the module (module-level variable)
+@pytest.fixture
+def mock_redis(monkeypatch, fake_redis):
+    """Fixture that monkeypatches redis_client and redis module to use fake_redis."""
     monkeypatch.setattr(app_module, "redis_client", fake_redis)
-    # Also patch redis.from_url and redis.Redis for any future instantiation
     monkeypatch.setattr(
         "fastapi_ms_oid_reader.redis.from_url",
         lambda url, decode_responses=False: fake_redis,
@@ -44,41 +43,27 @@ def test_whoami_with_session_cookie(monkeypatch, fake_redis):
     monkeypatch.setattr(
         "fastapi_ms_oid_reader.redis.Redis", lambda *args, **kwargs: fake_redis
     )
+    return fake_redis
 
+
+def test_whoami_with_session_cookie(mock_redis):
+    """Test /whoami returns ms_oid when session cookie is present and valid."""
     client = TestClient(app_module.app)
     response = client.get("/whoami", cookies={"session": "cookie123"})
     assert response.status_code == 200
     assert response.json() == {"ms_oid": "ms-oid-123"}
 
 
-def test_whoami_with_user_id_header(monkeypatch, fake_redis):
+def test_whoami_with_user_id_header(mock_redis):
     """Test /whoami returns ms_oid when X-User-ID header is present and valid."""
-    monkeypatch.setattr(app_module, "redis_client", fake_redis)
-    monkeypatch.setattr(
-        "fastapi_ms_oid_reader.redis.from_url",
-        lambda url, decode_responses=False: fake_redis,
-    )
-    monkeypatch.setattr(
-        "fastapi_ms_oid_reader.redis.Redis", lambda *args, **kwargs: fake_redis
-    )
-
     client = TestClient(app_module.app)
     response = client.get("/whoami", headers={"X-User-ID": "42"})
     assert response.status_code == 200
     assert response.json() == {"ms_oid": "ms-oid-42"}
 
 
-def test_whoami_with_user_id_cookie(monkeypatch, fake_redis):
+def test_whoami_with_user_id_cookie(mock_redis):
     """Test /whoami returns ms_oid when user_id cookie is present and valid."""
-    monkeypatch.setattr(app_module, "redis_client", fake_redis)
-    monkeypatch.setattr(
-        "fastapi_ms_oid_reader.redis.from_url",
-        lambda url, decode_responses=False: fake_redis,
-    )
-    monkeypatch.setattr(
-        "fastapi_ms_oid_reader.redis.Redis", lambda *args, **kwargs: fake_redis
-    )
-
     client = TestClient(app_module.app)
     response = client.get("/whoami", cookies={"user_id": "42"})
     assert response.status_code == 200
@@ -103,17 +88,8 @@ def test_whoami_unauthorized_no_cookie(monkeypatch):
     assert response.status_code == 401
 
 
-def test_whoami_unauthorized_invalid_session(monkeypatch, fake_redis):
+def test_whoami_unauthorized_invalid_session(mock_redis):
     """Test /whoami returns 401 when session cookie is invalid."""
-    monkeypatch.setattr(app_module, "redis_client", fake_redis)
-    monkeypatch.setattr(
-        "fastapi_ms_oid_reader.redis.from_url",
-        lambda url, decode_responses=False: fake_redis,
-    )
-    monkeypatch.setattr(
-        "fastapi_ms_oid_reader.redis.Redis", lambda *args, **kwargs: fake_redis
-    )
-
     client = TestClient(app_module.app)
     response = client.get("/whoami", cookies={"session": "invalid_cookie"})
     assert response.status_code == 401
