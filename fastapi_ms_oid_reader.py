@@ -22,9 +22,9 @@ REDIS_URL = os.environ.get("REDIS_URL")
 if REDIS_URL:
     redis_client = redis.from_url(REDIS_URL, decode_responses=False)
 else:
-    REDIS_HOST = os.environ.get("REDIS_HOST", "ntb-redis.redis.cache.windows.net")
-    REDIS_PORT = int(os.environ.get("REDIS_PORT", 6380))
-    REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
+    REDIS_HOST = os.getenv("REDIS_HOST", "ntb-redis.redis.cache.windows.net")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
     redis_client = redis.Redis(
         host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=True, decode_responses=False
     )
@@ -33,6 +33,7 @@ else:
 SESSION_COOKIE_NAME = os.environ.get("SESSION_COOKIE_NAME", "session")
 SHARED_KEY_PREFIX = os.environ.get("SHARED_KEY_PREFIX", "shared:ms_oid_by_session:")
 SHARED_USER_PREFIX = os.environ.get("SHARED_USER_PREFIX", "shared:ms_oid_by_user:")
+
 
 def get_ms_oid_from_request(request: Request) -> str:
     """
@@ -57,20 +58,25 @@ def get_ms_oid_from_request(request: Request) -> str:
 
     raise HTTPException(status_code=401, detail="ms_oid not found")
 
+
 # 依存関数（ルートで使う）
 def require_ms_oid(request: Request) -> str:
     return get_ms_oid_from_request(request)
+
 
 @app.get("/whoami")
 async def whoami(ms_oid: str = Depends(require_ms_oid)):
     # ここで ms_oid を使ってユーザや権限を引くなど実装可能
     return {"ms_oid": ms_oid}
 
+
 @app.get("/protected")
 async def protected(ms_oid: str = Depends(require_ms_oid)):
     # 実運用なら ms_oid から DB lookup して権限チェックなど行う
     return {"message": "ok", "ms_oid": ms_oid}
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("fastapi_ms_oid_reader:app", host="0.0.0.0", port=8000, reload=True)
