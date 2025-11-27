@@ -25,4 +25,7 @@ python-dotenv==1.0.0
 pymysql==1.1.2
 utils==1.0.2
 # Azure Communication Services for Email
-azure-communication-email==1.30.0
+azure-communication-email>=1.0
+httpx>=0.24
+redis>=4
+pytest>=7.4

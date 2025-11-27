@@ -9,6 +9,7 @@ import models
 import schemas
 from database import engine, get_db, test_connection
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
