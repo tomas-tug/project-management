@@ -4,6 +4,7 @@ from sqlalchemy import and_
 from datetime import datetime
 
 from models import (
+    User, Role, UserHasRoles, Ship,
     Project, ProjectAssignment, Task, Todo,
     TaskAssignment, TodoAssignment,
     TaskAttachment, TodoAttachment,
@@ -20,6 +21,49 @@ from schemas import (
     ProjectPhotoCreate
 )
 
+# ===== User CRUD (読み取り専用 - ntb_data テーブル) =====
+def get_user(db: Session, user_id: int) -> Optional[User]:
+    """ユーザーをIDで取得 (ntb_data.users)"""
+    return db.query(User).filter(User.id == user_id).first()
+
+
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    """ユーザーをメールアドレスで取得 (ntb_data.users)"""
+    return db.query(User).filter(User.email == email).first()
+
+
+def get_users(db: Session, skip: int = 0, limit: int = 100) -> List[User]:
+    """ユーザー一覧を取得 (ntb_data.users)"""
+    return db.query(User).offset(skip).limit(limit).all()
+
+
+# ===== Ship CRUD (読み取り専用 - ntb_data テーブル) =====
+def get_ship(db: Session, ship_id: int) -> Optional[Ship]:
+    """船舶をIDで取得 (ntb_data.ships)"""
+    return db.query(Ship).filter(Ship.id == ship_id).first()
+
+
+def get_ships(db: Session, skip: int = 0, limit: int = 100) -> List[Ship]:
+    """船舶一覧を取得 (ntb_data.ships)"""
+    return db.query(Ship).offset(skip).limit(limit).all()
+
+
+# ===== Role CRUD (読み取り専用 - ntb_data テーブル) =====
+def get_role(db: Session, role_id: int) -> Optional[Role]:
+    """ロールをIDで取得 (ntb_data.roles)"""
+    return db.query(Role).filter(Role.id == role_id).first()
+
+
+def get_user_roles(db: Session, user_id: int) -> List[Role]:
+    """ユーザーのロール一覧を取得 (ntb_data.roles, ntb_data.user_has_roles)"""
+    return db.query(Role).join(UserHasRoles).filter(
+        UserHasRoles.user_id == user_id
+    ).all()
+
+
+def get_roles(db: Session, skip: int = 0, limit: int = 100) -> List[Role]:
+    """ロール一覧を取得 (ntb_data.roles)"""
+    return db.query(Role).offset(skip).limit(limit).all()
 
 # ===== Project CRUD =====
 def create_project(db: Session, project: ProjectCreate) -> Project:

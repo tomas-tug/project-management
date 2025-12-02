@@ -106,14 +106,7 @@ async def protected(ms_oid: str = Depends(require_ms_oid)):
     return {"message": "ok", "ms_oid": ms_oid}
 
 
-# Users
-@app.post("/users/", response_model=schemas.User)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = crud.get_user_by_email(db, email=user.email)
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    return crud.create_user(db=db, user=user)
-
+# ===== Users (読み取り専用 - ntb_data テーブル参照) =====
 @app.get("/users/{user_id}", response_model=schemas.User)
 def read_user(user_id: int, db: Session = Depends(get_db)):
     db_user = crud.get_user(db, user_id=user_id)
@@ -126,11 +119,9 @@ def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     users = crud.get_users(db, skip=skip, limit=limit)
     return users
 
-# Ships
-@app.post("/ships/", response_model=schemas.Ship)
-def create_ship(ship: schemas.ShipCreate, db: Session = Depends(get_db)):
-    return crud.create_ship(db=db, ship=ship)
+# Note: User はマスターデータ(ntb_data)のため、作成・更新・削除エンドポイントは提供しません
 
+# ===== Ships (読み取り専用 - ntb_data テーブル参照) =====
 @app.get("/ships/", response_model=list[schemas.Ship])
 def read_ships(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     ships = crud.get_ships(db, skip=skip, limit=limit)
@@ -143,7 +134,7 @@ def read_ship(ship_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Ship not found")
     return db_ship
 
-# Note: Ship は読み取り専用モデルのため、更新・削除エンドポイントは提供しません
+# Note: Ship はマスターデータ(ntb_data)のため、作成・更新・削除エンドポイントは提供しません
 
 
 

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # データベース接続情報の取得
+# ntb_projects に接続すると ntb_data のテーブルも参照可能
 user = os.getenv("MYSQL_USER")
 password = urllib.parse.quote_plus(os.getenv("MYSQL_PASSWORD", ""))
 host = os.getenv("MYSQL_HOST")
@@ -24,18 +25,15 @@ if not all([user, host, database]):
     raise ValueError("Database configuration is incomplete. Check your .env file.")
 
 logger.info(f"Connecting to Azure MySQL: {database}@{host}")
+logger.info("ntb_data tables are accessible from ntb_projects connection")
 
 # Azure MySQL 用の接続URL
 SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{user}:{password}@{host}:3306/{database}?ssl_ca={ssl_ca}&ssl_verify_identity=true"
 
-# Azure MySQL 推奨のSSL設定
-
 logger.info("SSL connection enabled for Azure MySQL")
 
 # エンジンの作成
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL
-)
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
 # セッションの作成
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -45,6 +43,7 @@ Base = declarative_base()
 
 # 依存性注入用の関数
 def get_db():
+    """データベースセッション (ntb_projects + ntb_data 参照可能)"""
     db = SessionLocal()
     try:
         yield db

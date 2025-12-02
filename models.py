@@ -20,18 +20,6 @@ class DockCategories(enum.Enum):
     NotSet = ""
 
 
-# 中間テーブル定義
-ship_assignments = Table(
-    'ship_assignments',
-    Base.metadata,
-    Column('id', Integer, primary_key=True),
-    Column('user_id', Integer, ForeignKey('users.id')),
-    Column('ship_id', Integer, ForeignKey('ships.id')),
-    Column('created_at', DateTime, default=lambda: datetime.now(timezone("Asia/Tokyo")), nullable=False),
-    Column('updated_at', DateTime, default=lambda: datetime.now(timezone("Asia/Tokyo")), onupdate=lambda: datetime.now(timezone("Asia/Tokyo")), nullable=False)
-)
-
-
 # TimestampMixin for created_at and updated_at
 class TimestampMixin:
     @declared_attr
@@ -52,10 +40,11 @@ class TimestampMixin:
         )
 
 
-# ===== 読み取り専用モデル =====
-# User Model (読み取り専用)
+# ===== 読み取り専用モデル (ntb_data) =====
+# User Model (読み取り専用 - ntb_data)
 class User(Base, TimestampMixin):
     __tablename__ = "users"
+    __table_args__ = {'schema': 'ntb_data'}
     
     id = Column(Integer, primary_key=True)
     email = Column(String(64), unique=True, index=True)
@@ -64,8 +53,7 @@ class User(Base, TimestampMixin):
     ms_id = Column(String(128))
     
     # Relationships
-    ships = relationship("Ship", secondary=ship_assignments, back_populates="users")
-    roles = relationship("Role", secondary="user_has_roles", back_populates="users")
+    roles = relationship("Role", secondary="ntb_data.user_has_roles", back_populates="users")
     project_assignments = relationship("ProjectAssignment", back_populates="user")
     task_assignments = relationship("TaskAssignment", back_populates="user")
     todo_assignments = relationship("TodoAssignment", back_populates="user")
@@ -76,9 +64,10 @@ class User(Base, TimestampMixin):
     project_photos = relationship("ProjectPhoto", back_populates="user")
 
 
-# Ship Model (読み取り専用)
+# Ship Model (読み取り専用 - ntb_data)
 class Ship(Base, TimestampMixin):
     __tablename__ = "ships"
+    __table_args__ = {'schema': 'ntb_data'}
     
     id = Column(Integer, primary_key=True)
     name = Column(String(128))
@@ -96,33 +85,32 @@ class Ship(Base, TimestampMixin):
     navigation_area_id = Column(Integer)  # ForeignKey削除（navigation_areasテーブルが未定義）
     deck_Categories = Column(Enum(DockCategories), default=DockCategories.NotSet)
     recent_dock = Column(DateTime)
-    mobile_phone = Column(String(32))
-    ship_telephone = Column(String(32))
     
     # Relationships
-    users = relationship("User", secondary=ship_assignments, back_populates="ships")
     projects = relationship("Project", back_populates="ship")
 
 
-# Role Model (読み取り専用)
+# Role Model (読み取り専用 - ntb_data)
 class Role(Base, TimestampMixin):
     __tablename__ = "roles"
+    __table_args__ = {'schema': 'ntb_data'}
     
     id = Column(Integer, primary_key=True)
     name = Column(String(128))
     description = Column(String(255))
     
     # Relationships
-    users = relationship("User", secondary="user_has_roles", back_populates="roles")
+    users = relationship("User", secondary="ntb_data.user_has_roles", back_populates="roles")
 
 
-# UserHasRoles Model (読み取り専用)
+# UserHasRoles Model (読み取り専用 - ntb_data)
 class UserHasRoles(Base, TimestampMixin):
     __tablename__ = "user_has_roles"
+    __table_args__ = {'schema': 'ntb_data'}
     
     id = Column(Integer, primary_key=True)
-    role_id = Column(Integer, ForeignKey("roles.id"))
-    user_id = Column(Integer, ForeignKey("users.id"))
+    role_id = Column(Integer, ForeignKey("ntb_data.roles.id"))
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"))
 
 
 # ===== 既存モデル =====
@@ -133,8 +121,8 @@ class Project(Base, TimestampMixin):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
     discription = Column(Text, nullable=True)
-    ship_id = Column(Integer, ForeignKey("ships.id"), nullable=True)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    ship_id = Column(Integer, ForeignKey("ntb_data.ships.id"), nullable=True)
+    owner_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     dock = Column(Boolean)
     yard = Column(String(128))
     dock_in_date = Column(DateTime)
@@ -156,7 +144,7 @@ class ProjectAssignment(Base, TimestampMixin):
     __tablename__ = "project_assignments"
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
 
     # Relationships
@@ -248,7 +236,7 @@ class TaskAssignment(Base, TimestampMixin):
     __tablename__ = "task_assignments"
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     project_id = Column(Integer, nullable=False)
     task_number = Column(Integer, nullable=False)
 
@@ -275,7 +263,7 @@ class TodoAssignment(Base, TimestampMixin):
     __tablename__ = "todo_assignments"
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     project_id = Column(Integer, nullable=False)
     task_number = Column(Integer, nullable=False)
     todo_number = Column(Integer, nullable=False)
@@ -306,7 +294,7 @@ class TaskAttachment(Base, TimestampMixin):
     id = Column(Integer, primary_key=True)
     project_id = Column(Integer, nullable=False)
     task_number = Column(Integer, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     file_id = Column(String(255), nullable=False)
     directory_id = Column(String(255))
     originname = Column(String(128), nullable=False)
@@ -344,7 +332,7 @@ class TodoAttachment(Base, TimestampMixin):
     project_id = Column(Integer, nullable=False)
     task_number = Column(Integer, nullable=False)
     todo_number = Column(Integer, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     file_id = Column(String(255), nullable=False)
     directory_id = Column(String(255))  # カラムを追加
     originname = Column(String(128), nullable=False)
@@ -382,7 +370,7 @@ class TaskComment(Base, TimestampMixin):
     id = Column(Integer, primary_key=True)
     project_id = Column(Integer, nullable=False)
     task_number = Column(Integer, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     content = Column(Text, nullable=False)
 
     # 外部キー制約
@@ -412,7 +400,7 @@ class TodoComment(Base, TimestampMixin):
     project_id = Column(Integer, nullable=False)
     task_number = Column(Integer, nullable=False)
     todo_number = Column(Integer, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     content = Column(Text, nullable=False)
 
     # 外部キー制約
@@ -443,7 +431,7 @@ class ProjectPhoto(Base, TimestampMixin):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     task_number = Column(Integer, nullable=True)
     todo_number = Column(Integer, nullable=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("ntb_data.users.id"), nullable=False)
     file_id = Column(String(255), nullable=False)
     category = Column(String(128), nullable=True)
     description = Column(Text, nullable=True)
