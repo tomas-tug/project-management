@@ -11,7 +11,9 @@ from database import engine, get_db, test_connection
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import redis
-from typing import Optional
+from auth import get_current_user
+from typing import Dict, Optional
+import httpx
 
 
 @asynccontextmanager
@@ -39,71 +41,78 @@ origins = [
     "http://localhost:3000",
 ]
 
-app.add_middleware(
+# CORS設定（Reactから呼び出す場合）
+app. add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:3000",  # React開発環境
+        "http://localhost:5000",  # Flask開発環境
+        "https://your-flask-app.azurewebsites.net",
+        "https://your-react-app.azurewebsites.net",
+        # 本番環境のドメインを追加
+    ],
+    allow_credentials=True,  # Cookieを許可
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Redis 接続（REDIS_URL を優先）
-REDIS_URL = os.environ.get("REDIS_URL")
-if REDIS_URL:
-    redis_client = redis.from_url(REDIS_URL, decode_responses=False)
-else:
-    REDIS_HOST = os.getenv("REDIS_HOST", "ntb-redis.redis.cache.windows.net")
-    REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
-    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
-    redis_client = redis.Redis(
-        host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=True, decode_responses=False
-    )
+@app.get("/")
+async def root():
+    """ヘルスチェック"""
+    return {
+        "message": "FastAPI is running",
+        "auth": "Shared with Flask via Redis"
+    }
 
-# 設定：Flask と同じ SESSION_COOKIE 名を使うこと
-SESSION_COOKIE_NAME = os.environ.get("SESSION_COOKIE_NAME", "session")
-SHARED_KEY_PREFIX = os.environ.get("SHARED_KEY_PREFIX", "shared:ms_oid_by_session:")
-SHARED_USER_PREFIX = os.environ.get("SHARED_USER_PREFIX", "shared:ms_oid_by_user:")
-
-
-def get_ms_oid_from_request(request: Request) -> str:
+@app.get("/api/protected")
+async def protected_route(user: Dict = Depends(get_current_user)):
     """
-    リクエストの cookie から session id を取り、Redis の専用キーを読み出して ms_oid を返す。
-    見つからなければ HTTPException(401) を投げる。
+    認証が必要なエンドポイントの例
     """
-    # 1) session cookie ベース
-    session_cookie = request.cookies.get(SESSION_COOKIE_NAME)
-    if session_cookie:
-        key = SHARED_KEY_PREFIX + session_cookie
-        blob = redis_client.get(key)
-        if blob:
-            return blob.decode("utf-8") if isinstance(blob, (bytes, bytearray)) else str(blob)
+    return {
+        "message": "認証成功！",
+        "ms_oid": user["ms_oid"],
+        "note": "このエンドポイントはFlaskでログインしたユーザーのみアクセス可能です"
+    }
 
-    # 2) fallback: user_id ベース（例：ヘッダや別 cookie で伝えてくる場合）
-    user_id = request.headers.get("X-User-ID") or request.cookies.get("user_id")
-    if user_id:
-        key = SHARED_USER_PREFIX + str(user_id)
-        blob = redis_client.get(key)
-        if blob:
-            return blob.decode("utf-8") if isinstance(blob, (bytes, bytearray)) else str(blob)
+@app.get("/api/graph/me")
+async def get_user_profile(user: Dict = Depends(get_current_user)):
+    """
+    Microsoft Graph APIを呼び出してユーザー情報を取得
+    """
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {user['access_token']}"},
+            timeout=30.0
+        )
+        
+        if response.status_code == 200:
+            user_data = response.json()
+            return {
+                "displayName": user_data.get("displayName"),
+                "mail": user_data.get("mail"),
+                "jobTitle": user_data.get("jobTitle"),
+                "officeLocation": user_data.get("officeLocation"),
+            }
+        else:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Graph API error: {response.text}"
+            )
 
-    raise HTTPException(status_code=401, detail="ms_oid not found")
-
-
-# 依存関数（ルートで使う）
-def require_ms_oid(request: Request) -> str:
-    return get_ms_oid_from_request(request)
-
-
-@app.get("/whoami")
-async def whoami(ms_oid: str = Depends(require_ms_oid)):
-    # ここで ms_oid を使ってユーザや権限を引くなど実装可能
-    return {"ms_oid": ms_oid}
-
-
-@app.get("/protected")
-async def protected(ms_oid: str = Depends(require_ms_oid)):
-    # 実運用なら ms_oid から DB lookup して権限チェックなど行う
-    return {"message": "ok", "ms_oid": ms_oid}
+@app.get("/api/debug/session")
+async def debug_session(
+    user: Dict = Depends(get_current_user)
+):
+    """
+    デバッグ用：認証情報を確認
+    """
+    return {
+        "ms_oid": user["ms_oid"],
+        "has_access_token": bool(user. get("access_token")),
+        "token_preview": user["access_token"][:50] + "..." if user. get("access_token") else None
+    }
 
 
 # ===== Users (読み取り専用 - ntb_data テーブル参照) =====
