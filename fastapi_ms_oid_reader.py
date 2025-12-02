@@ -1,82 +1,107 @@
-from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
 import os
-import redis
 from typing import Optional
 
-app = FastAPI(title="MSOID Reader")
+import redis
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
-# CORS 設定（フロントエンドが別ホストにある場合は調整）
-origins = os.environ.get("CORS_ORIGINS", "")
-allow_origins = origins.split(",") if origins else ["http://localhost:3000"]
+# Configuration from environment
+REDIS_URL = os.getenv("REDIS_URL")
+REDIS_HOST = os.getenv("REDIS_HOST", "ntb-redis.redis.cache.windows.net")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6380"))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
+
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "session")
+SHARED_KEY_PREFIX = os.getenv("SHARED_KEY_PREFIX", "shared:ms_oid_by_session:")
+SHARED_USER_PREFIX = os.getenv("SHARED_USER_PREFIX", "shared:ms_oid_by_user:")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+
+# Initialize redis client (module-level; tests may monkeypatch redis.from_url or redis.Redis or redis_client)
+if REDIS_URL:
+    redis_client = redis.from_url(REDIS_URL, decode_responses=False)
+else:
+    redis_client = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        password=REDIS_PASSWORD or None,
+        ssl=True,
+        decode_responses=False,
+    )
+
+app = FastAPI()
+
+# Configure CORS
+origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,   # cookie を許可するなら True にする
+    allow_origins=origins or ["http://localhost:3000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Redis 接続（REDIS_URL を優先）
-REDIS_URL = os.environ.get("REDIS_URL")
-if REDIS_URL:
-    redis_client = redis.from_url(REDIS_URL, decode_responses=False)
-else:
-    REDIS_HOST = os.getenv("REDIS_HOST", "ntb-redis.redis.cache.windows.net")
-    REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
-    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
-    redis_client = redis.Redis(
-        host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, ssl=True, decode_responses=False
-    )
 
-# 設定：Flask と同じ SESSION_COOKIE 名を使うこと
-SESSION_COOKIE_NAME = os.environ.get("SESSION_COOKIE_NAME", "session")
-SHARED_KEY_PREFIX = os.environ.get("SHARED_KEY_PREFIX", "shared:ms_oid_by_session:")
-SHARED_USER_PREFIX = os.environ.get("SHARED_USER_PREFIX", "shared:ms_oid_by_user:")
+def _decode_redis_value(val: Optional[bytes]) -> Optional[str]:
+    if val is None:
+        return None
+    if isinstance(val, bytes):
+        try:
+            return val.decode("utf-8")
+        except Exception:
+            return None
+    if isinstance(val, str):
+        return val
+    return None
 
 
 def get_ms_oid_from_request(request: Request) -> str:
     """
-    リクエストの cookie から session id を取り、Redis の専用キーを読み出して ms_oid を返す。
-    見つからなければ HTTPException(401) を投げる。
+    Attempts to read ms_oid from Redis using:
+      1. session cookie -> SHARED_KEY_PREFIX + session_id
+      2. header X-User-ID or cookie user_id -> SHARED_USER_PREFIX + user_id
+    Raises HTTPException(401) if not found.
     """
-    # 1) session cookie ベース
-    session_cookie = request.cookies.get(SESSION_COOKIE_NAME)
-    if session_cookie:
-        key = SHARED_KEY_PREFIX + session_cookie
-        blob = redis_client.get(key)
-        if blob:
-            return blob.decode("utf-8") if isinstance(blob, (bytes, bytearray)) else str(blob)
+    # 1) try session cookie
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_id:
+        key = f"{SHARED_KEY_PREFIX}{session_id}"
+        try:
+            val = redis_client.get(key)
+        except Exception:
+            val = None
+        ms_oid = _decode_redis_value(val)
+        if ms_oid:
+            return ms_oid
 
-    # 2) fallback: user_id ベース（例：ヘッダや別 cookie で伝えてくる場合）
+    # 2) fallback to user id via header or cookie
     user_id = request.headers.get("X-User-ID") or request.cookies.get("user_id")
     if user_id:
-        key = SHARED_USER_PREFIX + str(user_id)
-        blob = redis_client.get(key)
-        if blob:
-            return blob.decode("utf-8") if isinstance(blob, (bytes, bytearray)) else str(blob)
+        key = f"{SHARED_USER_PREFIX}{user_id}"
+        try:
+            val = redis_client.get(key)
+        except Exception:
+            val = None
+        ms_oid = _decode_redis_value(val)
+        if ms_oid:
+            return ms_oid
 
-    raise HTTPException(status_code=401, detail="ms_oid not found")
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-# 依存関数（ルートで使う）
-def require_ms_oid(request: Request) -> str:
+def get_ms_oid_dependency(request: Request) -> str:
     return get_ms_oid_from_request(request)
 
 
 @app.get("/whoami")
-async def whoami(ms_oid: str = Depends(require_ms_oid)):
-    # ここで ms_oid を使ってユーザや権限を引くなど実装可能
+def whoami(ms_oid: str = Depends(get_ms_oid_dependency)):
     return {"ms_oid": ms_oid}
 
 
 @app.get("/protected")
-async def protected(ms_oid: str = Depends(require_ms_oid)):
-    # 実運用なら ms_oid から DB lookup して権限チェックなど行う
+def protected(ms_oid: str = Depends(get_ms_oid_dependency)):
     return {"message": "ok", "ms_oid": ms_oid}
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     uvicorn.run("fastapi_ms_oid_reader:app", host="0.0.0.0", port=8000, reload=True)
